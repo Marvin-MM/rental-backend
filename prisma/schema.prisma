@@ -1,0 +1,448 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                        String                @id @default(cuid())
+  email                     String                @unique
+  password                  String
+  firstName                 String
+  lastName                  String
+  role                      UserRole                @default(TENANT)
+  isActive                  Boolean               @default(true)
+  lastLogin                 DateTime?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+
+  // Relations
+  tenant                    Tenant?
+  owner                     Owner?
+  manager                   Manager?
+  sentMessages              Message[]             @relation("SentMessages")
+  receivedMessages          Message[]             @relation("ReceivedMessages")
+  notifications             Notification[]
+  loginAttempts             LoginAttempt[]
+  auditLogs                 AuditLog[]
+  maintenanceRequests       MaintenanceRequest[]  @relation("MaintenanceRequester")
+  assignedMaintenanceRequests MaintenanceRequest[] @relation("MaintenanceAssignee")
+  maintenanceUpdates        MaintenanceUpdate[]
+  calendarEvents            CalendarEvent[]       @relation("CalendarEventCreator")
+  reports                  Report[]
+
+  @@map("users")
+}
+
+model Owner {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  companyName String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  properties Property[]
+  managers   Manager[]
+  analytics  Analytics[]
+
+  @@map("owners")
+}
+
+model Manager {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  ownerId     String
+  permissions Json     @default("{}")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  owner Owner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("managers")
+}
+
+model Property {
+  id                   String               @id @default(cuid())
+  ownerId              String
+  name                 String
+  description          String?
+  address              String
+  type                 PropertyType         @default(APARTMENT)
+  units                Int                  @default(1)
+  rentAmount           Decimal              @db.Decimal(10, 2)
+  status               PropertyStatus        @default(AVAILABLE)
+  images               String[]             @default([])
+  amenities            String[]             @default([])
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  // Relations
+  owner                Owner                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tenants              Tenant[]
+  leases               Lease[]
+  complaints           Complaint[]
+  maintenanceRequests  MaintenanceRequest[]
+
+  @@map("properties")
+}
+
+model Tenant {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  propertyId     String
+  firstName      String
+  lastName       String
+  phone          String
+  emergencyContact Json?
+  moveInDate     DateTime?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property     Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  leases       Lease[]
+  payments     Payment[]
+  complaints   Complaint[]
+  analytics    Analytics[]
+
+  @@map("tenants")
+}
+
+model Lease {
+  id             String      @id @default(cuid())
+  propertyId     String
+  tenantId       String
+  startDate      DateTime
+  endDate        DateTime
+  rentAmount     Decimal     @db.Decimal(10, 2)
+  securityDeposit Decimal?   @db.Decimal(10, 2)
+  status         LeaseStatus @default(ACTIVE)
+  terms          Json?
+  documentUrl    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  property Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@map("leases")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  tenantId      String
+  leaseId       String
+  amount        Decimal       @db.Decimal(10, 2)
+  dueDate       DateTime
+  paidDate      DateTime?
+  status        PaymentStatus @default(PENDING)
+  method        PaymentMethod @default(ONLINE)
+  transactionId String?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lease    Lease    @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  receipts Receipt[]
+
+  @@map("payments")
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  paymentId String
+  pdfUrl    String
+  amount    Decimal  @db.Decimal(10, 2)
+  generatedAt DateTime @default(now())
+
+  // Relations
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@map("receipts")
+}
+
+model Message {
+  id         String      @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  type       MessageType @default(TEXT)
+  isRead     Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+
+  // Relations
+  sender   User @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  recipientId String
+  title       String
+  message     String
+  type        NotificationType
+  status      NotificationStatus @default(UNREAD)
+  metadata    Json?
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  // Relations
+  recipient User @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Complaint {
+  id         String          @id @default(cuid())
+  propertyId String
+  tenantId   String?
+  subject    String
+  message    String
+  status     ComplaintStatus @default(OPEN)
+  isAnonymous Boolean        @default(false)
+  priority   Priority        @default(MEDIUM)
+  response   String?
+  respondedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  // Relations
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenant   Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@map("complaints")
+}
+
+model Analytics {
+  id        String        @id @default(cuid())
+  ownerId   String?
+  tenantId  String?
+  type      AnalyticsType
+  data      Json
+  period    String        // e.g., "2024-01", "2024-Q1"
+  createdAt DateTime      @default(now())
+
+  // Relations
+  owner  Owner?  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("analytics")
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  userId    String?
+  email     String
+  ipAddress String
+  success   Boolean
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("login_attempts")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  action       String
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  resourceType String
+  resourceId   String
+  details      Json?
+  ipAddress    String?
+  userAgent    String?
+  timestamp    DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  title       String
+  type        String
+  data        Json
+  generatedBy String
+  user        User     @relation(fields: [generatedBy], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model MaintenanceRequest {
+  id            String              @id @default(cuid())
+  title         String
+  description   String
+  category      String // PLUMBING, ELECTRICAL, HVAC, APPLIANCE, STRUCTURAL, OTHER
+  priority      String              @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  urgency       String              @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  status        String              @default("OPEN") // OPEN, IN_PROGRESS, COMPLETED, CANCELLED
+  propertyId    String
+  property      Property            @relation(fields: [propertyId], references: [id])
+  requestedById String
+  requestedBy   User                @relation(name: "MaintenanceRequester", fields: [requestedById], references: [id])
+  assignedToId  String?
+  assignedTo    User?               @relation(name: "MaintenanceAssignee", fields: [assignedToId], references: [id])
+  resolution    String?
+  assignedAt    DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  updates       MaintenanceUpdate[]
+}
+
+model MaintenanceUpdate {
+  id                    String             @id @default(cuid())
+  maintenanceRequestId  String
+  maintenanceRequest    MaintenanceRequest @relation(fields: [maintenanceRequestId], references: [id], onDelete: Cascade)
+  updatedById          String
+  updatedBy            User               @relation(fields: [updatedById], references: [id])
+  description          String
+  changes              Json?
+  createdAt            DateTime           @default(now())
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  type        String   @default("STRING") // STRING, NUMBER, BOOLEAN, JSON
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  startDate   DateTime
+  endDate     DateTime
+  type        String?
+  relatedId   String?
+  createdById String
+  createdBy   User     @relation("CalendarEventCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FeatureFlag {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  isEnabled   Boolean @default(false)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Enums
+enum UserRole {
+  SUPER_ADMIN
+  OWNER
+  MANAGER
+  TENANT
+}
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  CONDO
+  TOWNHOUSE
+  STUDIO
+  OTHER
+}
+
+enum PropertyStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+  UNAVAILABLE
+}
+
+enum LeaseStatus {
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  PENDING
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  ONLINE
+  CASH
+  CHECK
+  BANK_TRANSFER
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  SYSTEM
+}
+
+enum NotificationType {
+  PAYMENT_REMINDER
+  LEASE_EXPIRY
+  MAINTENANCE
+  ALERT
+  SYSTEM
+  PUSH
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  SENT
+  FAILED
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum AnalyticsType {
+  REVENUE
+  OCCUPANCY
+  PAYMENT_HISTORY
+  TENANT_METRICS
+  PROPERTY_PERFORMANCE
+}
