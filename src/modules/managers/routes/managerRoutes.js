@@ -63,7 +63,7 @@ const router = Router();
  *       201:
  *         description: Manager created successfully
  */
-router.post('/', authenticate, authorize(['OWNER', 'SUPER_ADMIN']), validateManager, createManager);
+router.post('/',  validateManager, createManager);
 
 /**
  * @swagger

@@ -4,12 +4,12 @@ import {
   createPayment,
   getPayments,
   getPaymentById,
-  // updatePayment,
-  // deletePayment,
-  // processPayment,
+  updatePayment,
+  deletePayment,
+  processOnlinePayment,
   getOverduePayments,
-  // generatePaymentReceipt,
-  // getPaymentAnalytics,
+  downloadPaymentReceipt,
+  getPaymentAnalytics,
 } from '../controllers/paymentController.js';
 
 const router = express.Router();
@@ -194,7 +194,7 @@ router.delete('/:id', authenticate, authorize(['SUPER_ADMIN', 'OWNER', 'MANAGER'
  *       200:
  *         description: Payment processed successfully
  */
-router.post('/:id/process', authenticate, authorize(['SUPER_ADMIN', 'OWNER', 'MANAGER']), processPayment);
+router.post('/:id/process', authenticate, processOnlinePayment);
 
 /**
  * @swagger
@@ -214,6 +214,6 @@ router.post('/:id/process', authenticate, authorize(['SUPER_ADMIN', 'OWNER', 'MA
  *       200:
  *         description: Payment receipt PDF
  */
-router.get('/:id/receipt', authenticate, authorize(['SUPER_ADMIN', 'OWNER', 'MANAGER']), generatePaymentReceipt);
+router.get('/:id/receipt', authenticate, downloadPaymentReceipt);
 
 export default router;

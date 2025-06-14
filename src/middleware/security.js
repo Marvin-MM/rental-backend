@@ -1,4 +1,3 @@
-
 import rateLimit from 'express-rate-limit';
 import ExpressBrute from 'express-brute';
 import helmet from 'helmet';
@@ -37,12 +36,21 @@ export const sensitiveOperationLimit = rateLimit({
 export const preventParameterPollution = (req, res, next) => {
   const pollutionKeys = ['id', 'email', 'role'];
   
-  for (const key of pollutionKeys) {
-    if (Array.isArray(req.query[key])) {
-      req.query[key] = req.query[key][0];
+  // Check query parameters (safe for all requests)
+  if (req.query) {
+    for (const key of pollutionKeys) {
+      if (Array.isArray(req.query[key])) {
+        req.query[key] = req.query[key][0];
+      }
     }
-    if (Array.isArray(req.body[key])) {
-      req.body[key] = req.body[key][0];
+  }
+
+  // **THE FIX**: Only check body parameters if the body exists.
+  if (req.body) {
+    for (const key of pollutionKeys) {
+      if (Array.isArray(req.body[key])) {
+        req.body[key] = req.body[key][0];
+      }
     }
   }
   

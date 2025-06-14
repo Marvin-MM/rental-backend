@@ -5,7 +5,7 @@ import { hashPassword } from '../../../utils/helpers.js';
 
 export const createOwner = async (req, res) => {
   try {
-    const { email, password, companyName, phone, address } = req.body;
+    const { email, password, firstName, lastName, companyName, phone, address } = req.body;
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -26,6 +26,8 @@ export const createOwner = async (req, res) => {
         email,
         password: hashedPassword,
         role: 'OWNER',
+        firstName,
+        lastName,
         owner: {
           create: {
             companyName,

@@ -197,7 +197,101 @@ export const generateLeaseAgreement = async (data) => {
   });
 };
 
+/**
+ * Generates a generic report in PDF format.
+ * @param {Array<Object>} data - The array of data objects to display in the table.
+ * @param {string} title - The title of the report.
+ * @param {Array<{id: string, title: string, path?: string}>} headers - The headers for the table columns.
+ * @returns {Promise<Buffer>} - PDF buffer.
+ */
+export const generatePdfReport = async (data, title, headers) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ layout: 'landscape', margin: 30 });
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+      // Title
+      doc.fontSize(18).text(title, { align: 'center' });
+      doc.fontSize(10).text(`Generated on: ${new Date().toLocaleDateString()}`, { align: 'center' });
+      doc.moveDown(2);
+
+      // Table Header
+      const tableTop = doc.y;
+      const colWidth = (doc.page.width - 60) / headers.length;
+      
+      doc.font('Helvetica-Bold');
+      headers.forEach((header, i) => {
+        doc.text(header.title, 30 + (i * colWidth), tableTop, { width: colWidth, align: 'left' });
+      });
+      doc.font('Helvetica');
+      const headerHeight = doc.y - tableTop;
+      doc.moveTo(30, tableTop + headerHeight + 5).lineTo(doc.page.width - 30, tableTop + headerHeight + 5).stroke();
+      doc.y = tableTop + headerHeight + 10;
+      
+      // Table Rows
+      data.forEach(item => {
+        const rowTop = doc.y;
+        let maxHeight = 0;
+
+        // Calculate max height for the row first, to handle multi-line text gracefully
+        headers.forEach((header, i) => {
+          const value = getNestedValue(item, header.path || header.id) ?? 'N/A';
+          const textHeight = doc.heightOfString(String(value), { width: colWidth });
+          if(textHeight > maxHeight) maxHeight = textHeight;
+        });
+
+        // Check if the new row will fit on the page, otherwise create a new page
+        if (doc.y + maxHeight > doc.page.height - 30) {
+            doc.addPage();
+            doc.y = 30; // Reset y position
+        }
+        
+        // Render the row
+        headers.forEach((header, i) => {
+          const value = getNestedValue(item, header.path || header.id) ?? 'N/A';
+          doc.text(String(value), 30 + (i * colWidth), doc.y, { width: colWidth, align: 'left' });
+        });
+        
+        doc.x = 30; // Reset x position for the next row
+        doc.y += maxHeight + 10; // Move y position down based on the tallest cell
+      });
+
+      doc.end();
+    } catch (error) {
+      logger.error('Error generating PDF report:', error);
+      reject(error);
+    }
+  });
+};
+
+/**
+ * Generates a generic report in CSV format.
+ * @param {Array<Object>} data - The array of data objects.
+ * @param {Array<{id: string, title: string, path?: string}>} headers - The headers for the CSV columns.
+ * @returns {Promise<string>} - CSV content as a string.
+ */
+export const generateCsvReport = async (data, headers) => {
+    try {
+        const headerRow = headers.map(h => `"${h.title}"`).join(',');
+        const dataRows = data.map(row => {
+            return headers.map(header => {
+                const value = getNestedValue(row, header.path || header.id) ?? '';
+                // Escape quotes by doubling them and enclose in quotes
+                return `"${String(value).replace(/"/g, '""')}"`;
+            }).join(',');
+        });
+        return [headerRow, ...dataRows].join('\n');
+    } catch (error) {
+        logger.error('Error generating CSV report:', error);
+        throw error;
+    }
+};
+
 export default {
   generatePaymentReceipt,
   generateLeaseAgreement,
+  generatePdfReport,
+  generateCsvReport,
 };

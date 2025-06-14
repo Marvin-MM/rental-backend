@@ -66,7 +66,7 @@ import { sendWelcomeEmail } from '../../notifications/services/emailService.js';
  *         description: User already exists
  */
 export const register = asyncHandler(async (req, res) => {
-  const { email, password, role, companyName, phone } = req.body;
+  const { email, password, role, companyName, firstName, lastName, phone } = req.body;
 
   // Check if user already exists
   const existingUser = await prisma.user.findUnique({
@@ -89,6 +89,8 @@ export const register = asyncHandler(async (req, res) => {
       email: email.toLowerCase(),
       password: hashedPassword,
       role,
+      firstName,
+      lastName,
     },
   });
 
@@ -132,6 +134,8 @@ export const register = asyncHandler(async (req, res) => {
     user: {
       id: user.id,
       email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
       role: user.role,
       isActive: user.isActive,
       createdAt: user.createdAt,

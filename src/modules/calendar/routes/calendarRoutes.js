@@ -3,8 +3,8 @@ import { authenticate, authorize } from '../../../middleware/auth.js';
 import {
   createCalendarEvent,
   getCalendarEvents,
-  updateCalendarEvent,
-  deleteCalendarEvent,
+  // updateCalendarEvent,
+  // deleteCalendarEvent,
 } from '../controllers/calendarController.js';
 
 const router = Router();

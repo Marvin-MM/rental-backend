@@ -245,3 +245,27 @@ export const validateSystemSetting = (req, res, next) => {
 
   validateSchema(systemSettingSchema)(req, res, next);
 };
+
+export const validateUser = (req, res, next) => {
+  const userSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(6),
+    role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'TENANT']),
+    companyName: z.string().optional(),
+    phone: z.string().optional(),
+  });
+
+  validateSchema(userSchema)(req, res, next);
+};
+
+export const validateUserUpdate = (req, res, next) => {
+  const userUpdateSchema = z.object({
+    email: z.string().email().optional(),
+    password: z.string().min(6).optional(),
+    role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'TENANT']).optional(),
+    companyName: z.string().optional(),
+    phone: z.string().optional(),
+  });
+
+  validateSchema(userUpdateSchema)(req, res, next);
+};

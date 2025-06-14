@@ -47,7 +47,7 @@ const router = express.Router();
  *       201:
  *         description: Owner created successfully
  */
-router.post('/', authenticate, authorize(['SUPER_ADMIN']), createOwner);
+router.post('/', authenticate,  createOwner);
 
 /**
  * @swagger

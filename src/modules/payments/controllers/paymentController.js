@@ -1,83 +1,17 @@
-
 import { asyncHandler } from '../../../middleware/errorHandler.js';
 import prisma from '../../../config/database.js';
 import logger from '../../../config/logger.js';
-import { generatePaymentReceipt } from '../../../utils/pdfGenerator.js';
+import { generatePaymentReceipt as generatePdf } from '../../../utils/pdfGenerator.js';
 import { sendPaymentConfirmationEmail, sendPaymentReminderEmail } from '../../notifications/services/emailService.js';
 import { uploadToCloudinary } from '../../../utils/cloudinary.js';
+import { successResponse, errorResponse } from '../../../utils/responseHelpers.js';
 
-/**
- * @swagger
- * components:
- *   schemas:
- *     Payment:
- *       type: object
- *       properties:
- *         id:
- *           type: string
- *         amount:
- *           type: number
- *         dueDate:
- *           type: string
- *           format: date
- *         paidDate:
- *           type: string
- *           format: date
- *         status:
- *           type: string
- *           enum: [PENDING, PAID, OVERDUE, CANCELLED, REFUNDED]
- *         method:
- *           type: string
- *           enum: [ONLINE, CASH, CHECK, BANK_TRANSFER]
- *         transactionId:
- *           type: string
- *         notes:
- *           type: string
- */
-
-/**
- * @swagger
- * /payments:
- *   get:
- *     tags: [Payments]
- *     summary: Get all payments
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [PENDING, PAID, OVERDUE, CANCELLED, REFUNDED]
- *       - in: query
- *         name: tenantId
- *         schema:
- *           type: string
- *       - in: query
- *         name: propertyId
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Payments retrieved successfully
- */
 export const getPayments = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, status, tenantId, propertyId, startDate, endDate } = req.query;
   const skip = (parseInt(page) - 1) * parseInt(limit);
 
   const where = {};
 
-  // Role-based filtering
   if (req.user.role === 'TENANT') {
     where.tenantId = req.user.tenant.id;
   } else if (req.user.role === 'OWNER') {
@@ -96,7 +30,6 @@ export const getPayments = asyncHandler(async (req, res) => {
     where.lease = { ...where.lease, propertyId };
   }
 
-  // Date range filter
   if (startDate || endDate) {
     where.dueDate = {};
     if (startDate) where.dueDate.gte = new Date(startDate);
@@ -146,7 +79,7 @@ export const getPayments = asyncHandler(async (req, res) => {
     prisma.payment.count({ where }),
   ]);
 
-  res.json({
+  return successResponse(res, {
     payments,
     pagination: {
       total,
@@ -157,26 +90,6 @@ export const getPayments = asyncHandler(async (req, res) => {
   });
 });
 
-/**
- * @swagger
- * /payments/{id}:
- *   get:
- *     tags: [Payments]
- *     summary: Get payment by ID
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Payment retrieved successfully
- *       404:
- *         description: Payment not found
- */
 export const getPaymentById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
@@ -215,76 +128,27 @@ export const getPaymentById = asyncHandler(async (req, res) => {
   });
 
   if (!payment) {
-    return res.status(404).json({
-      error: 'Payment not found',
-      message: 'Payment with this ID does not exist',
-    });
+    return errorResponse(res, 'Payment not found', 404);
   }
 
-  // Check access permissions
   if (req.user.role === 'TENANT' && payment.tenantId !== req.user.tenant.id) {
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'You can only access your own payments',
-    });
+    return errorResponse(res, 'You can only access your own payments', 403);
   }
 
   if (req.user.role === 'OWNER' && payment.lease.property.ownerId !== req.user.owner.id) {
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'You can only access payments for your properties',
-    });
+    return errorResponse(res, 'You can only access payments for your properties', 403);
   }
 
   if (req.user.role === 'MANAGER' && payment.lease.property.ownerId !== req.user.manager.ownerId) {
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'You can only access payments for properties you manage',
-    });
+    return errorResponse(res, 'You can only access payments for properties you manage', 403);
   }
 
-  res.json({ payment });
+  return successResponse(res, { payment });
 });
 
-/**
- * @swagger
- * /payments:
- *   post:
- *     tags: [Payments]
- *     summary: Create a new payment record
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - tenantId
- *               - leaseId
- *               - amount
- *               - dueDate
- *             properties:
- *               tenantId:
- *                 type: string
- *               leaseId:
- *                 type: string
- *               amount:
- *                 type: number
- *               dueDate:
- *                 type: string
- *                 format: date
- *               notes:
- *                 type: string
- *     responses:
- *       201:
- *         description: Payment created successfully
- */
 export const createPayment = asyncHandler(async (req, res) => {
   const { tenantId, leaseId, amount, dueDate, notes } = req.body;
 
-  // Verify lease and tenant relationship
   const lease = await prisma.lease.findUnique({
     where: { id: leaseId },
     include: {
@@ -294,26 +158,16 @@ export const createPayment = asyncHandler(async (req, res) => {
   });
 
   if (!lease) {
-    return res.status(404).json({
-      error: 'Lease not found',
-      message: 'Lease with this ID does not exist',
-    });
+    return errorResponse(res, 'Lease not found', 404);
   }
 
   if (lease.tenantId !== tenantId) {
-    return res.status(400).json({
-      error: 'Invalid tenant',
-      message: 'Tenant is not associated with this lease',
-    });
+    return errorResponse(res, 'Tenant is not associated with this lease', 400);
   }
 
-  // Check permissions
   const allowedOwnerId = req.user.role === 'OWNER' ? req.user.owner.id : req.user.manager.ownerId;
   if (lease.property.ownerId !== allowedOwnerId) {
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'You can only create payments for your properties',
-    });
+    return errorResponse(res, 'You can only create payments for your properties', 403);
   }
 
   const payment = await prisma.payment.create({
@@ -324,213 +178,210 @@ export const createPayment = asyncHandler(async (req, res) => {
       dueDate: new Date(dueDate),
       notes,
     },
-    include: {
-      tenant: {
-        include: {
-          user: {
-            select: {
-              email: true,
-            },
-          },
-        },
-      },
-      lease: {
-        include: {
-          property: {
-            select: {
-              name: true,
-              address: true,
-            },
-          },
-        },
-      },
-    },
   });
 
-  // Send payment reminder email
-  try {
-    await sendPaymentReminderEmail(
-      payment.tenant.user.email,
-      `${payment.tenant.firstName} ${payment.tenant.lastName}`,
-      payment.amount,
-      payment.dueDate
-    );
-  } catch (error) {
-    logger.error('Failed to send payment reminder email:', error);
-  }
-
-  logger.info(`Payment created: ${payment.id} for tenant ${payment.tenant.firstName} ${payment.tenant.lastName}`);
-
-  res.status(201).json({
-    message: 'Payment created successfully',
-    payment,
-  });
+  return successResponse(res, payment, 'Payment created successfully', 201);
 });
 
-/**
- * @swagger
- * /payments/{id}/pay:
- *   post:
- *     tags: [Payments]
- *     summary: Mark payment as paid
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - method
- *             properties:
- *               method:
- *                 type: string
- *                 enum: [ONLINE, CASH, CHECK, BANK_TRANSFER]
- *               transactionId:
- *                 type: string
- *               notes:
- *                 type: string
- *     responses:
- *       200:
- *         description: Payment marked as paid successfully
- */
-export const markPaymentAsPaid = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { method, transactionId, notes } = req.body;
+export const updatePayment = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { amount, dueDate, notes } = req.body;
 
-  const payment = await prisma.payment.findUnique({
-    where: { id },
-    include: {
-      tenant: {
-        include: {
-          user: {
-            select: {
-              email: true,
-            },
-          },
+    const payment = await prisma.payment.findUnique({
+        where: { id },
+        include: { lease: { select: { property: { select: { ownerId: true } } } } }
+    });
+
+    if (!payment) {
+        return errorResponse(res, 'Payment not found', 404);
+    }
+    
+    const allowedOwnerId = req.user.role === 'OWNER' ? req.user.owner.id : req.user.manager?.ownerId;
+    if (payment.lease.property.ownerId !== allowedOwnerId) {
+        return errorResponse(res, 'You are not authorized to update this payment', 403);
+    }
+
+    if (payment.status !== 'PENDING') {
+        return errorResponse(res, `Cannot update payment with status '${payment.status}'`, 400);
+    }
+
+    const updatedPayment = await prisma.payment.update({
+        where: { id },
+        data: {
+            amount: amount ? parseFloat(amount) : undefined,
+            dueDate: dueDate ? new Date(dueDate) : undefined,
+            notes,
         },
-      },
-      lease: {
-        include: {
-          property: {
-            include: {
-              owner: {
-                select: {
-                  companyName: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (!payment) {
-    return res.status(404).json({
-      error: 'Payment not found',
-      message: 'Payment with this ID does not exist',
-    });
-  }
-
-  if (payment.status === 'PAID') {
-    return res.status(400).json({
-      error: 'Payment already paid',
-      message: 'This payment has already been marked as paid',
-    });
-  }
-
-  // Check permissions
-  const allowedOwnerId = req.user.role === 'OWNER' ? req.user.owner.id : req.user.manager.ownerId;
-  if (payment.lease.property.ownerId !== allowedOwnerId) {
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'You can only update payments for your properties',
-    });
-  }
-
-  // Update payment status
-  const updatedPayment = await prisma.payment.update({
-    where: { id },
-    data: {
-      status: 'PAID',
-      method,
-      transactionId,
-      paidDate: new Date(),
-      notes: notes || payment.notes,
-    },
-  });
-
-  // Generate receipt
-  try {
-    const receiptBuffer = await generatePaymentReceipt({
-      payment: updatedPayment,
-      tenant: payment.tenant,
-      property: payment.lease.property,
-      owner: payment.lease.property.owner,
     });
 
-    // Upload receipt to Cloudinary
-    const uploadResult = await uploadToCloudinary(receiptBuffer, 'receipts', {
-      resource_type: 'raw',
-      format: 'pdf',
-    });
-
-    // Save receipt record
-    await prisma.receipt.create({
-      data: {
-        paymentId: updatedPayment.id,
-        pdfUrl: uploadResult.secure_url,
-        amount: updatedPayment.amount,
-      },
-    });
-
-    // Send confirmation email with receipt
-    await sendPaymentConfirmationEmail(
-      payment.tenant.user.email,
-      `${payment.tenant.firstName} ${payment.tenant.lastName}`,
-      updatedPayment.amount,
-      uploadResult.secure_url
-    );
-
-  } catch (error) {
-    logger.error('Failed to generate receipt or send confirmation email:', error);
-  }
-
-  logger.info(`Payment marked as paid: ${id} by user ${req.user.email}`);
-
-  res.json({
-    message: 'Payment marked as paid successfully',
-    payment: updatedPayment,
-  });
+    return successResponse(res, updatedPayment, 'Payment updated successfully');
 });
 
-/**
- * @swagger
- * /payments/overdue:
- *   get:
- *     tags: [Payments]
- *     summary: Get overdue payments
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Overdue payments retrieved successfully
- */
+export const deletePayment = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    
+    const payment = await prisma.payment.findUnique({
+        where: { id },
+        include: { lease: { select: { property: { select: { ownerId: true } } } } }
+    });
+
+    if (!payment) {
+        return errorResponse(res, 'Payment not found', 404);
+    }
+
+    const allowedOwnerId = req.user.role === 'OWNER' ? req.user.owner.id : req.user.manager?.ownerId;
+    if (payment.lease.property.ownerId !== allowedOwnerId) {
+        return errorResponse(res, 'You are not authorized to delete this payment', 403);
+    }
+
+    if (payment.status === 'PAID') {
+        return errorResponse(res, 'Cannot delete a completed payment', 400);
+    }
+
+    await prisma.payment.delete({ where: { id } });
+
+    return successResponse(res, null, 'Payment deleted successfully');
+});
+
+export const processOnlinePayment = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { paymentMethodToken } = req.body; 
+
+    if (!paymentMethodToken) {
+        return errorResponse(res, 'Payment method token is required.', 400);
+    }
+    
+    const payment = await prisma.payment.findUnique({
+        where: { id },
+        include: { tenant: { include: { user: true } }, lease: { include: { property: { include: { owner: true } } } } }
+    });
+
+    if (!payment) {
+        return errorResponse(res, 'Payment not found', 404);
+    }
+    if (payment.tenant.userId !== req.user.id) {
+         return errorResponse(res, 'You can only pay for your own bills.', 403);
+    }
+    if (payment.status === 'PAID') {
+        return errorResponse(res, 'This payment has already been paid.', 400);
+    }
+
+    const transactionId = `txn_${new Date().getTime()}`;
+    logger.info(`Simulating payment for payment ID ${id} with token ${paymentMethodToken}`);
+    
+    const updatedPayment = await prisma.payment.update({
+        where: { id },
+        data: {
+            status: 'PAID',
+            method: 'ONLINE',
+            paidDate: new Date(),
+            transactionId,
+        },
+    });
+
+    try {
+        const receiptBuffer = await generatePdf({
+            payment: updatedPayment,
+            tenant: payment.tenant,
+            property: payment.lease.property,
+            owner: payment.lease.property.owner
+        });
+        const uploadResult = await uploadToCloudinary(receiptBuffer, 'receipts', { resource_type: 'raw', format: 'pdf' });
+        await prisma.receipt.create({
+            data: {
+                paymentId: updatedPayment.id,
+                pdfUrl: uploadResult.secure_url,
+                amount: updatedPayment.amount,
+            },
+        });
+        await sendPaymentConfirmationEmail(payment.tenant.user.email, `${payment.tenant.firstName} ${payment.tenant.lastName}`, updatedPayment.amount, uploadResult.secure_url);
+    } catch (error) {
+        logger.error(`Failed to generate receipt for payment ${id}:`, error);
+    }
+
+    return successResponse(res, updatedPayment, 'Payment processed successfully.');
+});
+
+export const downloadPaymentReceipt = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const payment = await prisma.payment.findUnique({
+        where: { id },
+        include: { tenant: { include: { user: true } }, lease: { include: { property: { include: { owner: true } } } } }
+    });
+    
+    if (!payment) {
+        return errorResponse(res, 'Payment not found', 404);
+    }
+    if (payment.status !== 'PAID') {
+        return errorResponse(res, 'Receipt is only available for paid payments', 400);
+    }
+
+    const isOwnerOrManager = (req.user.role === 'OWNER' && payment.lease.property.ownerId === req.user.owner.id) ||
+                            (req.user.role === 'MANAGER' && payment.lease.property.ownerId === req.user.manager.ownerId);
+    const isTenant = req.user.role === 'TENANT' && payment.tenantId === req.user.tenant.id;
+
+    if (!isOwnerOrManager && !isTenant && req.user.role !== 'SUPER_ADMIN') {
+        return errorResponse(res, 'You are not authorized to view this receipt', 403);
+    }
+
+    const pdfBuffer = await generatePdf({
+        payment,
+        tenant: payment.tenant,
+        property: payment.lease.property,
+        owner: payment.lease.property.owner
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=receipt-${payment.id}.pdf`);
+    res.send(pdfBuffer);
+});
+
+export const getPaymentAnalytics = asyncHandler(async (req, res) => {
+    let where = {};
+    if (req.user.role === 'OWNER') {
+        where = { lease: { property: { ownerId: req.user.owner.id } } };
+    } else if (req.user.role === 'MANAGER') {
+        where = { lease: { property: { ownerId: req.user.manager.ownerId } } };
+    }
+
+    const payments = await prisma.payment.findMany({ where });
+
+    const totalRevenue = payments
+        .filter(p => p.status === 'PAID')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+        
+    const pendingRevenue = payments
+        .filter(p => p.status === 'PENDING' || p.status === 'OVERDUE')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const statusBreakdown = payments.reduce((acc, p) => {
+        acc[p.status] = (acc[p.status] || 0) + 1;
+        return acc;
+    }, {});
+    
+    const methodBreakdown = payments.filter(p => p.status === 'PAID' && p.method).reduce((acc, p) => {
+        acc[p.method] = (acc[p.method] || 0) + 1;
+        return acc;
+    }, {});
+
+    const analytics = {
+        totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+        pendingRevenue: parseFloat(pendingRevenue.toFixed(2)),
+        statusBreakdown,
+        methodBreakdown,
+        totalTransactions: payments.length,
+    };
+    
+    return successResponse(res, analytics, "Payment analytics retrieved successfully.");
+});
+
 export const getOverduePayments = asyncHandler(async (req, res) => {
   const where = {
     status: 'PENDING',
     dueDate: { lt: new Date() },
   };
 
-  // Role-based filtering
   if (req.user.role === 'OWNER') {
     where.lease = {
       property: { ownerId: req.user.owner.id },
@@ -572,7 +423,6 @@ export const getOverduePayments = asyncHandler(async (req, res) => {
     orderBy: { dueDate: 'asc' },
   });
 
-  // Update status to OVERDUE
   if (overduePayments.length > 0) {
     const overdueIds = overduePayments.map(p => p.id);
     await prisma.payment.updateMany({
@@ -581,96 +431,12 @@ export const getOverduePayments = asyncHandler(async (req, res) => {
     });
   }
 
-  res.json({
+  return successResponse(res, {
     overduePayments: overduePayments.map(payment => ({
       ...payment,
       status: 'OVERDUE',
       daysOverdue: Math.floor((new Date() - new Date(payment.dueDate)) / (1000 * 60 * 60 * 24)),
     })),
     count: overduePayments.length,
-  });
-});
-
-/**
- * @swagger
- * /payments/{id}/receipt:
- *   get:
- *     tags: [Payments]
- *     summary: Get payment receipt
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Receipt retrieved successfully
- *       404:
- *         description: Receipt not found
- */
-export const getPaymentReceipt = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const payment = await prisma.payment.findUnique({
-    where: { id },
-    include: {
-      receipts: true,
-      tenant: true,
-      lease: {
-        include: {
-          property: true,
-        },
-      },
-    },
-  });
-
-  if (!payment) {
-    return res.status(404).json({
-      error: 'Payment not found',
-      message: 'Payment with this ID does not exist',
-    });
-  }
-
-  if (payment.status !== 'PAID') {
-    return res.status(400).json({
-      error: 'Payment not paid',
-      message: 'Receipt is only available for paid payments',
-    });
-  }
-
-  // Check access permissions
-  if (req.user.role === 'TENANT' && payment.tenantId !== req.user.tenant.id) {
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'You can only access your own receipts',
-    });
-  }
-
-  if (payment.receipts.length === 0) {
-    return res.status(404).json({
-      error: 'Receipt not found',
-      message: 'No receipt available for this payment',
-    });
-  }
-
-  const receipt = payment.receipts[0]; // Get the latest receipt
-
-  res.json({
-    receipt: {
-      id: receipt.id,
-      pdfUrl: receipt.pdfUrl,
-      amount: receipt.amount,
-      generatedAt: receipt.generatedAt,
-      payment: {
-        id: payment.id,
-        amount: payment.amount,
-        paidDate: payment.paidDate,
-        method: payment.method,
-        transactionId: payment.transactionId,
-      },
-    },
   });
 });
